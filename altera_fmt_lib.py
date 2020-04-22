@@ -4,6 +4,10 @@ A library for parsing some Altera/Intel FPGA (R) binary formats.
 """
 from struct import Struct, error as struct_error
 from collections import namedtuple
+import sys
+if sys.version_info < (3,):
+	raise Exception("Python version too old")
+	
 
 
 class AlteraTagException(Exception):
@@ -14,7 +18,7 @@ class AlteraTag:
 	found in JIC's and POF's, SOF's and likely others. Those are
 	expected to be tags, placed at the beginning of data blocks.
 	
-	Likely they are some kind of unique identifiers, that determine,
+	Likely these are some kind of unique identifiers, that determine,
 	which kind data structure resides at the inner layer of abstraction,
 	should this need clarification.
 	
@@ -47,6 +51,13 @@ class AlteraTag:
 	def check_ext_unstrict(self, ext):
 		"""Checks the first len(ext) bytes to match specified ext"""
 		return self.buf.startswith(ext)
+	
+	def decode_struct(self):
+		"""Decodes binary data according to suggested data structure.
+		String field is stripped from zero bytes to the right."""
+		x = S.unpack(self.buf)
+		return tuple([x[0].rstrip(b"\x00")] + x[1:])
+
 	
 	def classify(self):
 		"""Makes a lookup of object binary in static list of known types.
