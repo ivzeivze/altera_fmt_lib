@@ -25,9 +25,9 @@ class AlteraTag:
 	I might be completely wrong, however =)
 	"""
 	
-	def __init__(self, buf, strict=True):
+	def __init__(self, buf):
 		"""@param buf - 12 byte binary
-		@param strict - boolean, """
+		"""
 		if not (len(buf) == 12 and type(buf) == bytes):
 			raise AlteraTagException("Data buffer expected to be 12 bytes binary")
 		self.buf = buf
@@ -55,8 +55,8 @@ class AlteraTag:
 	def decode_struct(self):
 		"""Decodes binary data according to suggested data structure.
 		String field is stripped from zero bytes to the right."""
-		x = S.unpack(self.buf)
-		return tuple([x[0].rstrip(b"\x00")] + x[1:])
+		x = self.S.unpack(self.buf)
+		return (x[0].rstrip(b"\x00"),) + x[1:]
 
 	
 	def classify(self):
@@ -100,42 +100,59 @@ class JICReader:
 
 	JICPage = namedtuple("JICPage", ["type", "pos", "size"])
 
-	def __init__(self, f):
-		"""
-		Creates class instance for a JIC file.
+	def __init__(self, f, strict=True):
+		"""Creates class instance for a JIC file.
 		@param f - file, opened in binary mode, or file name to open
+		@param strict - set False to skip some parsing checks
 		"""
 		def prepare_fobj():
 			if type(f) != str:
 				return f
 			return open(f, 'rb')
 		self.f = prepare_fobj()
+		self.strict = bool(strict)
 		self._parse()
-		self._save_static_data
 
-	def _save_static_data(self):
+	def _make_static_data():
 		# Header type table
 		B = "BIN" # Binary
 		S = "STR" # Null-terminated string
-		self.HTT = {
+		htt = {
 			1  : (S, "Software version"),
 			2  : (S, "Chip name"),
-			3  : (S, "Title <unknown purpose>"),
-			27 : (S, "Flash device name"),
-			28 : (B, "Firmware <12 bytes unknown header(object declaration), then *.rpd equivalent, EPCS-sized space>"),
+			3  : (S, "Title"),
+			27 : (S, "Configuration device name"),
+			28 : (B, "Firmware"),
 			30 : (B, "<Unknown binary>"),
 			26 : (B, "<Unknown binary struct, string inside>"),
 			8  : (B, "<Small binary, likely checksum>")
-
 		}
+		return htt
+	htt = _make_static_data()
+	
+	def describe_type_id(self, type_id):
+		"""Describes page type in human words"""
+		try:
+			t,desc = self.htt[type_id]
+		except KeyError:
+			return "<Unknown type id>"
+		return "%s %s"%(t,desc) 
 
 	def _parse(self):
 		f = self.f
 		jic_rec_hdr_st = Struct('<HI')
 		#
-		d = f.read(12)
-		if d[:3] != b'JIC':
-			raise JICReaderException("Magic header 'JIC' not found")
+		root_tag = AlteraTag(f.read(12))
+		if self.strict:
+			# strict
+			def check_rt():
+				return root_tag.classify() == "JIC_HEADER"
+		else:
+			# simplified
+			def check_rt():
+				return root_tag.check_ext_unstrict(b"JIC")
+		if not check_rt():
+			raise JICReaderException("Bad root tag.\n"+str(root_tag))
 		#
 		def read_rec_headers():
 			while True:
@@ -156,6 +173,7 @@ class JICReader:
 			if our_pos != eof_pos:
 				raise JICReaderException("Parsing pages resulted in falling %i bytes beyond the end of file"%(our_pos-eof_pos))
 		self.headers = list(read_rec_headers())
+		#
 		def build_typedict():
 			D = dict()
 			for i,h in enumerate(self.headers):
@@ -168,9 +186,11 @@ class JICReader:
 		self.typedict = build_typedict()
 
 	def __repr__(self):
+		def G(h):
+			return str(h) + "\n\t└>" + self.describe_type_id(h.type)
 		def F(x):
 			i,h = x
-			return "%i: %s"%(i,h)
+			return "%i: %s"%(i,G(h))
 		return type(self).__name__ + " of %s\navailable pages:\n"%(self.f.name) + "\n".join(map(F, enumerate(jr.headers)))
 
 	def read_page(self, hdr):
@@ -203,6 +223,40 @@ class JICReader:
 		tt.sort()
 		return tt
 
-
+	def extract_firmware(self):
+		"""Extracts complete configuration device image, stored in JIC.
+		The resulting byte stream is encoded the same way as an RPD
+		file.
+		A JIC file does not contain (highly likely) any information
+		regarding block allocation, rather it stores an amalgam of
+		possible multiple blocks, mixed with unallocated space, denoted
+		by 0xff, that is the default post-erase value for at least EPCS 
+		flash family.
+		FPGA boot loader stream for a valid JIC starts from zero address
+		and extends for some arbitrary byte length. After the end of
+		boot image 0xff blank bytes are found stuffing the free space.
+		However without knowing the original MAP file it is impossible
+		to determine, where boot image ends, and where the trailing 
+		bytes start, as it is fairly possible (and typical) for a boot
+		image to end with some number of 0xff bytes (as seen by 
+		analyzing valid RPD-s). FPGA hardware loader engine obviously
+		has means to stop at boot loader end, but it's mechanics are 
+		beyond our scope of interest. One might be pretty sure, that if
+		enough trailing 0xff bytes are copied, the boot loader will 
+		function fine.
+		"""
+		FW_PAGE_ID = 28
+		pp = self.read_pages_by_type(FW_PAGE_ID)
+		if not (len(pp) == 1 if self.strict else len(pp) != 0):
+			raise JICReaderException("%i firmware (code id %i) pages found, this is not OK."%(len(pp), FW_PAGE_ID))
+		#
+		data = pp[0]
+		tag = AlteraTag(data[:12])
+		#
+		if self.strict:
+			if tag.classify() != "RAW_FIRMWARE":
+				raise JICReaderException("Tag mismatch, found bad tag: %s"%(tag))
+		#
+		return data[12:]
 
 jr=JICReader("/home/ivze/rrd-d/prj/SKMv20/output_files/SKMv20.jic")
