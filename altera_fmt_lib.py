@@ -7,7 +7,6 @@ from collections import namedtuple
 import sys
 if sys.version_info < (3,):
 	raise Exception("Python version too old")
-	
 
 
 class AlteraTagException(Exception):
@@ -226,13 +225,15 @@ class JICReader:
 	def extract_firmware(self):
 		"""Extracts complete configuration device image, stored in JIC.
 		The resulting byte stream is encoded the same way as an RPD
-		file.
-		A JIC file does not contain (highly likely) any information
+		file (not to be confused with RBF files, those are encoded 
+		differently and have a different purpose, see 
+		"Bug ID: FB: 514899;" in Intel FPGA Knowledge DB).
+			A JIC file does not contain (highly likely) any information
 		regarding block allocation, rather it stores an amalgam of
 		possible multiple blocks, mixed with unallocated space, denoted
 		by 0xff, that is the default post-erase value for at least EPCS 
 		flash family.
-		FPGA boot loader stream for a valid JIC starts from zero address
+			FPGA boot loader stream for a valid JIC starts from zero address
 		and extends for some arbitrary byte length. After the end of
 		boot image 0xff blank bytes are found stuffing the free space.
 		However without knowing the original MAP file it is impossible
@@ -258,5 +259,3 @@ class JICReader:
 				raise JICReaderException("Tag mismatch, found bad tag: %s"%(tag))
 		#
 		return data[12:]
-
-jr=JICReader("/home/ivze/rrd-d/prj/SKMv20/output_files/SKMv20.jic")
