@@ -190,7 +190,7 @@ class JICReader:
 		def F(x):
 			i,h = x
 			return "%i: %s"%(i,G(h))
-		return type(self).__name__ + " of %s\navailable pages:\n"%(self.f.name) + "\n".join(map(F, enumerate(jr.headers)))
+		return type(self).__name__ + " of %s\navailable pages:\n"%(self.f.name) + "\n".join(map(F, enumerate(self.headers)))
 
 	def read_page(self, hdr):
 		"""Reads page data by page structure as found in self.headers"""
